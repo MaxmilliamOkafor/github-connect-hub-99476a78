@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "ATS Tailor v1.8.0 - Enhanced CV Parser + Rich-Text",
-  "version": "1.8.0",
-  "description": "v1.8.0: Enhanced multi-page CV parser for PDF/DOCX. Rich-text editor for education (bold/italic). Improved work experience extraction for multiple roles. ATS-safe plain-text export.",
+  "name": "ATS Tailor v2.0 - Profile-Only Enhanced Parser",
+  "version": "2.0.0",
+  "description": "v2.0: Profile-only ATS parser that uses ONLY technical experience from profile page. Removed all base-cv-text.txt references and fallback logic. Enhanced work experience extraction with rich-text support.",
   "permissions": [
     "storage",
     "activeTab",
@@ -217,6 +217,7 @@
         "cv-formatter-perfect.js",
         "cv-formatter-perfect-enhanced.js",
         "workday-handlers.js",
+        "profile-only-parser.js",
         "content.js"
       ],
       "css": ["content.css"],
@@ -259,7 +260,7 @@
         "cv-formatter-perfect.js",
         "cv-formatter-perfect-enhanced.js",
         "cv-preview-enhanced.html",
-        "integration-example.html",
+        "profile-only-parser.js",
         "workday-handlers.js"
       ],
       "matches": ["<all_urls>"]

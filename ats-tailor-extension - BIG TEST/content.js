@@ -1,11 +1,11 @@
-// content.js - AUTO-TAILOR + ATTACH v1.5.0 ULTRA BLAZING
-// Automatically triggers tailoring on ATS pages, then attaches files
+// content.js - PROFILE-ONLY ATS TAILOR v2.0
+// Uses ONLY profile page technical experience - NO base-cv-text.txt references
 // 50% FASTER for LazyApply integration
 
 (function() {
   'use strict';
 
-  console.log('[ATS Tailor] AUTO-TAILOR v1.5.0 ULTRA BLAZING loaded on:', window.location.hostname);
+  console.log('[ATS Tailor] PROFILE-ONLY v2.0 loaded on:', window.location.hostname);
 
   // ============ CONFIGURATION ============
   const SUPABASE_URL = 'https://wntpldomgjutwufphnpg.supabase.co';
@@ -126,7 +126,7 @@
     
     return (hasApplyBtn && hasJobDesc) || isApplyUrl;
   }
-  
+
   // Global success banner message (100% for ALL platforms) - FIXED: removed duplicate prefix
   const SUCCESS_BANNER_MSG = '✅ Done! Match: 100% - Files attached!';
 
@@ -350,7 +350,7 @@
       return true;
     }
     
-    // ============ FRESH JD TAILOR + ATTACH (Per-Role, No Fallback) ============
+    // ============ FRESH JD TAILOR + ATTACH (Per-Role, Profile-Only) ============
     if (message.action === 'INSTANT_TAILOR_ATTACH') {
       const start = performance.now();
       const jobUrl = message.jobUrl || window.location.href;
@@ -359,10 +359,9 @@
       createStatusBanner();
       updateBanner('Extracting JD keywords...', 'working');
       
-      chrome.storage.local.get(['ats_session', 'ats_profile', 'ats_baseCV'], async (data) => {
+      chrome.storage.local.get(['ats_session', 'ats_profile'], async (data) => {
         try {
           const session = data.ats_session;
-          const baseCV = data.ats_baseCV || '';
           const profile = data.ats_profile || {};
           
           if (!session?.access_token) {
@@ -389,12 +388,15 @@
           console.log(`[ATS Tailor] Extracted ${keywordCount} role-specific keywords:`, keywordPreview);
           updateBanner('📝 Tailoring CV with all keywords...', 'working');
           
+          // Build CV from profile work experience only (NO base-cv-text.txt)
+          const cvContent = buildCVFromProfile(profile, jobInfo);
+          
           // Tailor CV with extracted keywords (~20ms)
-          let tailoredCV = baseCV;
+          let tailoredCV = cvContent;
           if (typeof TurboPipeline !== 'undefined' && TurboPipeline.turboTailorCV) {
-            tailoredCV = await TurboPipeline.turboTailorCV(baseCV, keywords, jobInfo);
+            tailoredCV = await TurboPipeline.turboTailorCV(cvContent, keywords, jobInfo);
           } else if (typeof TailorUniversal !== 'undefined' && TailorUniversal.tailorCV) {
-            tailoredCV = await TailorUniversal.tailorCV(baseCV, keywords, { jobTitle, company: jobInfo.company });
+            tailoredCV = await TailorUniversal.tailorCV(cvContent, keywords, { jobTitle, company: jobInfo.company });
           }
           
           // Calculate match score
@@ -413,7 +415,7 @@
           if (typeof OpenResumeGenerator !== 'undefined' && OpenResumeGenerator.generateATSPackage) {
             pdfResult = await OpenResumeGenerator.generateATSPackage(tailoredCV, keywords, jobInfo);
           } else if (typeof TurboPipeline !== 'undefined' && TurboPipeline.executeTurboPipeline) {
-            const pipelineResult = await TurboPipeline.executeTurboPipeline(jobInfo, profile, baseCV, { maxKeywords: 15 });
+            const pipelineResult = await TurboPipeline.executeTurboPipeline(jobInfo, profile, cvContent, { maxKeywords: 15 });
             if (pipelineResult.success) {
               pdfResult = { cv: pipelineResult.cvPDF, cover: pipelineResult.coverPDF };
             }
@@ -667,12 +669,15 @@
    * Runs full extraction + tailoring + PDF generation + attachment
    * Target: <200ms total, 100% keyword coverage
    */
-  async function executeWorkdayTop1Pipeline(snapshot, candidateData, baseCV) {
+  async function executeWorkdayTop1Pipeline(snapshot, candidateData) {
     const start = performance.now();
     console.log('[ATS Workday TOP1] 🚀 Executing full pipeline...');
     
     createStatusBanner();
     updateBanner('🚀 Workday TOP1: Full pipeline running...', 'working');
+    
+    // Build CV from profile work experience only (NO base-cv-text.txt)
+    const cvContent = buildCVFromProfile(candidateData, snapshot);
     
     // Check if TurboPipeline available
     if (typeof TurboPipeline !== 'undefined' && TurboPipeline.executeTurboPipeline) {
@@ -680,7 +685,7 @@
         const result = await TurboPipeline.executeTurboPipeline(
           snapshot,
           candidateData,
-          baseCV,
+          cvContent,
           {
             maxKeywords: 35,
             targetScore: 95,
@@ -870,14 +875,13 @@
         if (snapshot?.keywords?.all?.length) {
           console.log(`[ATS Workday TOP1] 📦 Recovered snapshot: ${snapshot.keywords.total} keywords from "${snapshot.title}"`);
           
-          // Load user profile and base CV
+          // Load user profile (NO baseCV reference)
           const data = await new Promise(resolve => {
-            chrome.storage.local.get(['ats_session', 'ats_profile', 'ats_baseCV'], resolve);
+            chrome.storage.local.get(['ats_session', 'ats_profile'], resolve);
           });
           
-          if (data.ats_session && data.ats_baseCV) {
+          if (data.ats_session) {
             const profile = data.ats_profile || {};
-            const baseCV = data.ats_baseCV;
             
             // Prepare candidateData
             const candidateData = {
@@ -889,10 +893,12 @@
               linkedin: profile.linkedin || '',
               github: profile.github || '',
               portfolio: profile.portfolio || '',
+              // Include full profile for CV building
+              ...profile
             };
             
             // EXECUTE FULL PIPELINE: Extract → Tailor → PDF → Attach
-            const result = await executeWorkdayTop1Pipeline(snapshot, candidateData, baseCV);
+            const result = await executeWorkdayTop1Pipeline(snapshot, candidateData);
             
             if (result?.success && filesLoaded) {
               // ATTACH BOTH: CV + Cover Letter
@@ -918,7 +924,7 @@
               workdayFlowState.cvAttached = true;
             }
           } else {
-            // No session/baseCV, fallback to cached files
+            // No session, fallback to cached files
             loadFilesAndStart();
             workdayFlowState.cvAttached = true;
           }
@@ -997,6 +1003,8 @@
       return;
     }
     
+    // Unknown page state - run generic tailor
+
     // Unknown page state - run generic tailor
     updateBanner('🚀 Workday: Running tailor...', 'working');
     autoTailorDocuments();
@@ -1151,6 +1159,97 @@
     console.log('[ATS Tailor] Running generic ATS flow');
     createStatusBanner();
     autoTailorDocuments();
+  }
+
+  // ============ PROFILE-ONLY CV BUILDER ============
+  // Build CV content using ONLY profile page technical experience - NO base-cv-text.txt
+  function buildCVFromProfile(profile, jobInfo) {
+    const firstName = profile.firstName || profile.first_name || '';
+    const lastName = profile.lastName || profile.last_name || '';
+    const email = profile.email || '';
+    const phone = profile.phone || '';
+    const city = stripRemoteFromLocation(profile.city) || defaultLocation;
+    const linkedin = profile.linkedin || '';
+    const github = profile.github || '';
+    const portfolio = profile.portfolio || '';
+    
+    // Use profile work_experience array
+    const workExperience = Array.isArray(profile.work_experience) ? profile.work_experience : [];
+    const education = Array.isArray(profile.education) ? profile.education : [];
+    const skills = Array.isArray(profile.skills) ? profile.skills : [];
+    const certifications = Array.isArray(profile.certifications) ? profile.certifications : [];
+    
+    // Build CV content
+    let cvContent = `${firstName} ${lastName}\n`;
+    cvContent += `${city} | ${email}`;
+    if (phone) cvContent += ` | ${phone}`;
+    if (linkedin) cvContent += ` | linkedin.com/in/${linkedin}`;
+    if (github) cvContent += ` | github.com/${github}`;
+    if (portfolio) cvContent += ` | ${portfolio}`;
+    cvContent += '\n\n';
+    
+    // Professional Summary
+    if (profile.summary || profile.ats_strategy) {
+      cvContent += `PROFESSIONAL SUMMARY\n`;
+      cvContent += `${profile.summary || profile.ats_strategy}\n\n`;
+    }
+    
+    // Technical Skills
+    if (skills.length > 0) {
+      cvContent += `TECHNICAL SKILLS\n`;
+      cvContent += skills.join(', ') + '\n\n';
+    }
+    
+    // Work Experience
+    if (workExperience.length > 0) {
+      cvContent += `PROFESSIONAL EXPERIENCE\n`;
+      workExperience.forEach(job => {
+        const title = job.title || job.jobTitle || '';
+        const company = job.company || job.companyName || '';
+        const startDate = job.startDate || job.start_date || '';
+        const endDate = job.endDate || job.end_date || 'Present';
+        const location = job.location || '';
+        
+        cvContent += `${title} | ${company} | ${startDate} - ${endDate}`;
+        if (location) cvContent += ` | ${location}`;
+        cvContent += '\n';
+        
+        // Add responsibilities/bullets
+        if (job.responsibilities && Array.isArray(job.responsibilities)) {
+          job.responsibilities.forEach(resp => {
+            cvContent += `• ${resp}\n`;
+          });
+        } else if (job.description) {
+          cvContent += `• ${job.description}\n`;
+        }
+        cvContent += '\n';
+      });
+    }
+    
+    // Education
+    if (education.length > 0) {
+      cvContent += `EDUCATION\n`;
+      education.forEach(edu => {
+        const degree = edu.degree || '';
+        const school = edu.school || edu.institution || '';
+        const year = edu.year || edu.graduationYear || '';
+        
+        cvContent += `${degree} | ${school}`;
+        if (year) cvContent += ` | ${year}`;
+        cvContent += '\n';
+      });
+      cvContent += '\n';
+    }
+    
+    // Certifications
+    if (certifications.length > 0) {
+      cvContent += `CERTIFICATIONS\n`;
+      certifications.forEach(cert => {
+        cvContent += `• ${cert}\n`;
+      });
+    }
+    
+    return cvContent;
   }
 
   // ============ STATUS BANNER ============
@@ -1798,6 +1897,9 @@
       console.log('[ATS Tailor] Job detected:', jobInfo.title, 'at', jobInfo.company);
       updateBanner(`Tailoring for: ${jobInfo.title}...`, 'working');
 
+      // Build CV from profile work experience only (NO base-cv-text.txt)
+      const cvContent = buildCVFromProfile(p, jobInfo);
+
       // Call tailor API
       const response = await fetch(`${SUPABASE_URL}/functions/v1/tailor-application`, {
         method: 'POST',
@@ -2011,7 +2113,7 @@
     }, 4);
   }
 
-  // ============ LOAD FILES AND START ==========
+  // ============ LOAD FILES AND START ============
   function loadFilesAndStart() {
     chrome.storage.local.get(['cvPDF', 'coverPDF', 'coverLetterText', 'cvFileName', 'coverFileName'], (data) => {
       cvFile = createPDFFile(data.cvPDF, data.cvFileName || 'Tailored_Resume.pdf');
@@ -2210,14 +2312,13 @@
     tailoringInProgress = true;
     
     try {
-      // Get session and profile
+      // Get session and profile (NO baseCV reference)
       const data = await new Promise(resolve => {
-        chrome.storage.local.get(['ats_session', 'ats_profile', 'ats_baseCV'], resolve);
+        chrome.storage.local.get(['ats_session', 'ats_profile'], resolve);
       });
       
       const session = data.ats_session;
       const profile = data.ats_profile || {};
-      const baseCV = data.ats_baseCV || '';
       
       if (!session?.access_token) {
         updateBanner('⚠️ Please login first', 'error');
@@ -2245,12 +2346,15 @@
       console.log(`[ATS Tailor] 🏆 Tier 1 extracted ${keywordCount} keywords for ${tier1Detection.company}`);
       updateBanner(`🏆 ${tier1Detection.company}: Tailoring CV (${keywordCount} keywords)...`, 'working');
       
+      // Build CV from profile work experience only (NO base-cv-text.txt)
+      const cvContent = buildCVFromProfile(profile, jobInfo);
+      
       // Tailor CV
-      let tailoredCV = baseCV;
+      let tailoredCV = cvContent;
       if (typeof TurboPipeline !== 'undefined' && TurboPipeline.turboTailorCV) {
-        tailoredCV = await TurboPipeline.turboTailorCV(baseCV, keywords, jobInfo);
+        tailoredCV = await TurboPipeline.turboTailorCV(cvContent, keywords, jobInfo);
       } else if (typeof TailorUniversal !== 'undefined' && TailorUniversal.tailorCV) {
-        tailoredCV = await TailorUniversal.tailorCV(baseCV, keywords, { jobTitle, company: jobInfo.company });
+        tailoredCV = await TailorUniversal.tailorCV(cvContent, keywords, { jobTitle, company: jobInfo.company });
       }
       
       updateBanner(`🏆 ${tier1Detection.company}: Generating PDF...`, 'working');
@@ -2260,7 +2364,7 @@
       if (typeof OpenResumeGenerator !== 'undefined' && OpenResumeGenerator.generateATSPackage) {
         pdfResult = await OpenResumeGenerator.generateATSPackage(tailoredCV, keywords, jobInfo);
       } else if (typeof TurboPipeline !== 'undefined' && TurboPipeline.executeTurboPipeline) {
-        const pipelineResult = await TurboPipeline.executeTurboPipeline(jobInfo, profile, baseCV, { maxKeywords: 35 });
+        const pipelineResult = await TurboPipeline.executeTurboPipeline(jobInfo, profile, cvContent, { maxKeywords: 35 });
         if (pipelineResult.success) {
           pdfResult = { cv: pipelineResult.cvPDF, cover: pipelineResult.coverPDF };
         }
